@@ -1,10 +1,8 @@
-<!DOCTYPE html>
-  <html>                                                                        
-  <head>
-      <meta charset="utf-8">                                                    
+<!DOCTYPE html>                                                               
+  <html>
+  <head>                                                                        
+      <meta charset="utf-8">                                
       <title>Advanced Routing Scheduler</title>
-      <!-- Leaflet loaded with onerror fallback — unpkg may be blocked by Geotab
-   CSP -->
       <link rel="stylesheet" 
   href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
   onerror="this.onerror=null;"/>
@@ -640,6 +638,29 @@
   URL.createObjectURL(new Blob([csv], {type:'text/csv'})); l.download =
   'RO_Export_' + td.toISOString().split('T')[0] + '.csv'; l.click();
           }
+
+          // Expose all functions called from inline HTML onclick/onchange
+  handlers to window.
+          // MyGeotab's preview wraps scripts in a scope where top-level
+  functions don't
+          // automatically land on window, causing "switchTab is not defined"
+  errors.
+          window.switchTab = switchTab;
+          window.loadData = loadData;
+          window.toggleFreq = toggleFreq;
+          window.saveSchedule = saveSchedule;
+          window.cancelSchedule = cancelSchedule;
+          window.saveLocation = saveLocation;
+          window.cancelLocation = cancelLocation;
+          window.resetPagination = resetPagination;
+          window.exportData = exportData;
+          window.pW = pW; window.nW = nW; window.pS = pS; window.nS = nS;
+          window.editSchedule = editSchedule;
+          window.deleteSchedule = deleteSchedule;
+          window.editLocation = editLocation;
+          window.downgradeLoc = downgradeLoc;
+          window.deleteLoc = deleteLoc;
+          window.panTo = panTo;
 
           window.geotab = window.geotab || {};
           window.geotab.addin = window.geotab.addin || {};
