@@ -3,8 +3,8 @@
 <head>
     <meta charset="utf-8">
     <title>Advanced Routing Scheduler</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css"/>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
     <style>
         body { margin: 0; padding: 15px; font-family: sans-serif; background: #f4f7f6; height: 100vh; box-sizing: border-box; overflow: hidden; }
         .container { background: #fff; padding: 15px; border-radius: 8px; height: 100%; display: flex; flex-direction: column; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
@@ -17,8 +17,8 @@
         .hide { display: none !important; }
         .split { display: flex; gap: 15px; flex: 1; min-height: 0; height: calc(100vh - 120px); }
         .pane-l { flex: 1.2; overflow-y: auto; padding-right: 10px; }
-        .pane-r { flex: 1; display: flex; flex-direction: column; position: relative; }
-        .map-box { flex: 1; border-radius: 8px; border: 1px solid #ccc; background: #eef2f3; z-index: 1; }
+        .pane-r { flex: 1; display: flex; flex-direction: column; position: relative; height: 100%; width: 100%; }
+        .map-box { flex: 1; width: 100%; height: 100%; min-height: 400px; border-radius: 8px; border: 1px solid #ccc; background: #eef2f3; z-index: 1; }
         .m-wms { background: #3498db; width: 16px; height: 16px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 4px #000; cursor: pointer; }
         .m-std { background: #95a5a6; width: 12px; height: 12px; border-radius: 50%; border: 1px solid #fff; box-shadow: 0 0 3px #000; cursor: pointer; }
     </style>
@@ -46,10 +46,8 @@
                         <div class="row">
                             <input id="rn" class="inp" style="flex: 2;" placeholder="Schedule Name *">
                             <select id="ri" class="inp" onchange="toggleFreq()">
-                                <option value="daily">Daily</option>
-                                <option value="weekly" selected>Weekly</option>
-                                <option value="biweekly">Bi-Weekly</option>
-                                <option value="monthly">Monthly</option>
+                                <option value="daily">Daily</option><option value="weekly" selected>Weekly</option>
+                                <option value="biweekly">Bi-Weekly</option><option value="monthly">Monthly</option>
                             </select>
                             <input id="rsd" class="inp" type="date">
                         </div>
@@ -131,8 +129,6 @@
     <script>
         var api, mId, C = [], R = [], eC = null, eR = null;
         var map1, map2, markers1 = [], markers2 = [];
-        
-        // Pagination Safety Variables
         var cW_pg = 1, cS_pg = 1, pP = 50; 
 
         const $ = (id) => document.getElementById(id);
@@ -141,19 +137,22 @@
         const gn = () => Math.random().toString(36).substr(2,9);
 
         function initMaps() {
-            if (!map1) { map1 = L.map('map1').setView([39.82, -98.57], 4); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OSM' }).addTo(map1); }
-            if (!map2) { map2 = L.map('map2').setView([39.82, -98.57], 4); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OSM' }).addTo(map2); }
+            // GOOGLE MAPS TILES - Bypasses corporate firewalls blocking OpenStreetMap
+            let tileUrl = 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}';
+            let tileOptions = { attribution: '© Google Maps', maxZoom: 20 };
+            
+            if (!map1) { map1 = L.map('map1').setView([39.82, -98.57], 4); L.tileLayer(tileUrl, tileOptions).addTo(map1); }
+            if (!map2) { map2 = L.map('map2').setView([39.82, -98.57], 4); L.tileLayer(tileUrl, tileOptions).addTo(map2); }
         }
 
         function switchTab(t) {
-            $('t1').classList.add('hide'); $('t1').style.display = 'none';
-            $('t2').classList.add('hide'); $('t2').style.display = 'none';
-            $('t' + t).classList.remove('hide'); $('t' + t).style.display = 'flex';
+            $('t1').classList.add('hide'); $('t2').classList.add('hide');
+            $('t' + t).classList.remove('hide'); 
             document.querySelectorAll('.tab-btn').forEach(b => b.className = 'btn tab-btn btn-gray');
             document.querySelectorAll('.tab-btn')[t-1].className = 'btn tab-btn btn-dark';
             setTimeout(() => { 
-                if(t === 1 && map1) { map1.invalidateSize(); drawMap(1); }
-                if(t === 2 && map2) { map2.invalidateSize(); drawMap(2); }
+                if(t === 1 && map1) { map1.invalidateSize(); drawMap(1, C.filter(c => c.iW)); }
+                if(t === 2 && map2) { map2.invalidateSize(); resetPagination(); }
             }, 250);
         }
 
@@ -198,47 +197,41 @@
 
         function finalizeLoad() {
             set('🟢 Database Synced');
-            $('main').classList.remove('hide'); $('main').style.display = 'flex';
+            $('main').classList.remove('hide'); 
             initMaps(); resetPagination(); renderSchedules(); renderExportList(); toggleFreq(); switchTab(1);
         }
 
-        // --- PERFORMANCE PAGINATION ENGINE ---
         function resetPagination() { cW_pg = 1; cS_pg = 1; renderPages(); }
         function nW() { cW_pg++; renderPages(); } function pW() { cW_pg--; renderPages(); }
         function nS() { cS_pg++; renderPages(); } function pS() { cS_pg--; renderPages(); }
 
         function renderPages() {
             let f = $('sc') ? $('sc').value.toLowerCase() : '';
-            let wA = [], sA = [];
-            let rlHtml = '';
+            let wA = [], sA = []; let rlHtml = '';
             
-            // Filter Arrays Fast
             C.forEach(c => {
                 if (c.d.n.toLowerCase().includes(f)) {
                     if (c.iW) { rlHtml += `<label style="display:block"><input type="checkbox" class="rcb" value="${c.id}"> ${enc(c.d.n)}</label>`; wA.push(c); } 
                     else { sA.push(c); }
                 }
             });
-            $('rcl').innerHTML = rlHtml; // Tab 1 Checkboxes
+            $('rcl').innerHTML = rlHtml; 
 
-            // Safely Paginate Advanced Zones
             let tW = Math.ceil(wA.length / pP) || 1;
             if (cW_pg > tW) cW_pg = tW; if (cW_pg < 1) cW_pg = 1;
-            let wHtml = '';
-            wA.slice((cW_pg - 1) * pP, cW_pg * pP).forEach(c => wHtml += buildRow(c, true));
+            let wHtml = ''; let activeAdv = wA.slice((cW_pg - 1) * pP, cW_pg * pP);
+            activeAdv.forEach(c => wHtml += buildRow(c, true));
             $('cW').innerHTML = wHtml;
             $('pW_txt').innerText = `${cW_pg} / ${tW} (${wA.length} total)`;
 
-            // Safely Paginate Standard Zones
             let tS = Math.ceil(sA.length / pP) || 1;
             if (cS_pg > tS) cS_pg = tS; if (cS_pg < 1) cS_pg = 1;
-            let sHtml = '';
-            sA.slice((cS_pg - 1) * pP, cS_pg * pP).forEach(c => sHtml += buildRow(c, false));
+            let sHtml = ''; let activeStd = sA.slice((cS_pg - 1) * pP, cS_pg * pP);
+            activeStd.forEach(c => sHtml += buildRow(c, false));
             $('cS').innerHTML = sHtml;
             $('pS_txt').innerText = `${cS_pg} / ${tS} (${sA.length} total)`;
 
-            // Only Draw map markers for currently visible paginated items to prevent map freezing
-            drawMap(1, wA); drawMap(2, wA.slice((cW_pg - 1) * pP, cW_pg * pP).concat(sA.slice((cS_pg - 1) * pP, cS_pg * pP)));
+            drawMap(1, wA); drawMap(2, activeAdv.concat(activeStd));
         }
 
         function buildRow(c, isAdv) {
@@ -306,7 +299,7 @@
             let r = Array.from(document.querySelectorAll('.ecb:checked')).map(x => x.value), ids = [];
             R.forEach(x => { if (r.includes(x.id)) ids = ids.concat(x.d.c); }); if(!ids.length) return alert("Select schedules to generate.");
             ids = [...new Set(ids)]; set('Generating Export...');
-            let csv = 'Arrival Date, Arrival Time, Order Id*,Order Type Id*,Account Name,Account Id*,Appointment Id*,Duration,Revenue,Window Begin Time*,Window End Time*,Appointment Notes,Contact Name*,Primary Phone,Secondary Phone,Email Address,Preferred Contact Method,Do Not Email,Do Not Phone,Do Not Text,City*,Country*,Postal Code,State*,Street1*,Street2,Latitude,Longitude,Locked Resource Id,Do Not Send Resource Id,Preferred Resource Id,Custom Status\\n';
+            let csv = 'Arrival Date, Arrival Time, Order Id*,Order Type Id*,Account Name,Account Id*,Appointment Id*,Duration,Revenue,Window Begin Time*,Window End Time*,Appointment Notes,Contact Name*,Primary Phone,Secondary Phone,Email Address,Preferred Contact Method,Do Not Email,Do Not Phone,Do Not Text,City*,Country*,Postal Code,State*,Street1*,Street2,Latitude,Longitude,Locked Resource Id,Do Not Send Resource Id,Preferred Resource Id,Custom Status\n';
             let td = new Date(); td.setHours(0,0,0,0); let ct = 0, dO = parseInt($('edo').value);
             for (let i = 0; i < dO; i++) {
                 let cd = new Date(td); cd.setDate(td.getDate() + i); let dw = cd.getDay(), ds = cd.toISOString().split('T')[0];
@@ -320,7 +313,7 @@
                     let t1 = c.d.t1 || '08:00', t2 = c.d.t2 || '17:00', no = c.d.no || '';
                     if (c.d.b1 && c.d.b2) { let s = c.d.brs || 'auto'; if (s === 'notes_only') no += ' [Unavail: ' + c.d.b1 + '-' + c.d.b2 + ']'; else { let m = x => parseInt(x.split(':')[0]) * 60 + parseInt(x.split(':')[1]); let da = m(c.d.b1) - m(t1), db = m(t2) - m(c.d.b2); if (s === 'morning') t2 = c.d.b1; else if (s === 'afternoon') t1 = c.d.b2; else { if (da >= db && da > 0) t2 = c.d.b1; else if (db > 0) t1 = c.d.b2; } no += ' [Unavail: ' + c.d.b1 + '-' + c.d.b2 + ']'; } }
                     let oI = 'R_' + (c.d.ac || id).replace(/[^a-zA-Z0-9]/g, '').substring(0, 8) + '_' + ds.replace(/-/g, '');
-                    csv += [ds, '', oI, esc(c.d.ty), esc(c.d.n), esc(c.d.ac || id), oI, c.d.du, c.d.re, t1, t2, esc(no), esc(c.d.cn || c.d.n), esc(c.d.ph), '', esc(c.d.em), 'Email', 'FALSE', 'FALSE', 'FALSE', esc(c.d.c), esc(c.d.o), esc(c.d.z), esc(c.d.s), esc(c.d.a), '', c.d.lt || '', c.d.ln || '', '', '', '', ''].join(',') + "\\n"; ct++;
+                    csv += [ds, '', oI, `"${c.d.ty}"`, `"${c.d.n}"`, `"${c.d.ac || id}"`, oI, c.d.du, c.d.re, t1, t2, `"${no}"`, `"${c.d.cn || c.d.n}"`, `"${c.d.ph}"`, '', `"${c.d.em}"`, 'Email', 'FALSE', 'FALSE', 'FALSE', `"${c.d.c}"`, `"${c.d.o}"`, `"${c.d.z}"`, `"${c.d.s}"`, `"${c.d.a}"`, '', c.d.lt || '', c.d.ln || '', '', '', '', ''].join(',') + "\n"; ct++;
                 });
             }
             set('🟢 Ready'); if (!ct) return alert('No active orders found for this timeframe.');
