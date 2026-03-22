@@ -578,6 +578,11 @@
 
         // GEOTAB INITIALIZATION
         geotab.addin.recurring_orders = function(api, state) {
+            // GEOTAB INITIALIZATION
+        window.geotab = window.geotab || {};
+        window.geotab.addin = window.geotab.addin || {};
+        
+        window.geotab.addin.recurring_orders = function(api, state) {
             return {
                 initialize: function(a, s, cb) {
                     window.api = a;
