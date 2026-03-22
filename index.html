@@ -1,17 +1,22 @@
-<!DOCTYPE html>                                                               
+<!DOCTYPE html>
   <html>                                                                        
   <head>
       <meta charset="utf-8">                                                    
       <title>Advanced Routing Scheduler</title>
+      <!-- Leaflet loaded with onerror fallback — unpkg may be blocked by Geotab
+   CSP -->
       <link rel="stylesheet" 
-  href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
+  onerror="this.onerror=null;"/>
+      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" 
+  onerror="window._leafletFailed=true;"></script>
       <style>
-          body { margin: 0; padding: 15px; font-family: sans-serif; background:
-  #f4f7f6; height: 100vh; box-sizing: border-box; overflow: hidden; }
+          html, body { margin: 0; padding: 0; height: 100%; font-family:
+  sans-serif; background: #f4f7f6; box-sizing: border-box; }
+          body { padding: 15px; box-sizing: border-box; }
           .container { background: #fff; padding: 15px; border-radius: 8px;
-  height: 100%; display: flex; flex-direction: column; box-shadow: 0 2px 4px
-  rgba(0,0,0,0.1); }
+  display: flex; flex-direction: column; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  }
           .row { display: flex; gap: 10px; margin-bottom: 10px; align-items:
   center; }
           .inp { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius:
@@ -24,13 +29,11 @@
           .btn-dark { background: #2c3e50; } .btn-gray { background: #95a5a6; }
   .btn-orange { background: #f39c12; }
           .hide { display: none !important; }
-          .split { display: flex; gap: 15px; flex: 1; min-height: 0; height:
-  calc(100vh - 120px); }
+          .split { display: flex; gap: 15px; }
           .pane-l { flex: 1.2; overflow-y: auto; padding-right: 10px; }
-          .pane-r { flex: 1; display: flex; flex-direction: column; position:
-  relative; }
-          .map-box { flex: 1; border-radius: 8px; border: 1px solid #ccc;
-  background: #eef2f3; z-index: 1; }
+          .pane-r { flex: 1; min-width: 0; }
+          .map-box { width: 100%; border-radius: 8px; border: 1px solid #ccc;
+  background: #eef2f3; }
           .m-wms { background: #3498db; width: 16px; height: 16px;
   border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 4px #000; cursor:
   pointer; }
@@ -233,7 +236,36 @@
           const esc = (s) => '"' + (s||'').toString().replace(/"/g, '""') + '"';
           const gn = () => Math.random().toString(36).substr(2,9);
 
-          function initMap(tab) {
+          function setMapHeight() {
+              var h = Math.max(window.innerHeight - 230, 300);
+              var m1 = $('map1'), m2 = $('map2');
+              if (m1) m1.style.height = h + 'px';
+              if (m2) m2.style.height = h + 'px';
+              if (map1) map1.invalidateSize();
+              if (map2) map2.invalidateSize();
+          }
+          window.addEventListener('resize', setMapHeight);
+
+          function leafletAvailable() {
+              if (window._leafletFailed || typeof L === 'undefined') {
+                  set('⚠️  Map library blocked — check browser console for CSP
+  errors');
+                  return false;
+              }
+              return true;
+          }
+
+          function initMap(tab, attempt) {
+              if (!leafletAvailable()) return;
+              attempt = attempt || 0;
+              var elId = tab === 1 ? 'map1' : 'map2';
+              var el = $(elId);
+              if (!el) return;
+              if (el.offsetHeight === 0 && attempt < 10) {
+                  requestAnimationFrame(function() { initMap(tab, attempt + 1);
+  });
+                  return;
+              }
               if (tab === 1 && !map1) {
                   map1 = L.map('map1').setView([39.82, -98.57], 4);
 
@@ -257,17 +289,16 @@
   'btn tab-btn btn-gray');
               document.querySelectorAll('.tab-btn')[t-1].className = 'btn
   tab-btn btn-dark';
-              setTimeout(() => {
+              setMapHeight();
+              requestAnimationFrame(function() {
                   initMap(t);
-                  if (t === 1 && map1) {
-                      map1.invalidateSize();
-                      drawMap(1, C.filter(c => c.iW));
-                  }
-                  if (t === 2 && map2) {
-                      map2.invalidateSize();
-                      renderPages();
-                  }
-              }, 250);
+                  setTimeout(function() {
+                      if (t === 1 && map1) { map1.invalidateSize(); drawMap(1,
+  C.filter(c => c.iW)); }
+                      if (t === 2 && map2) { map2.invalidateSize();
+  renderPages(); }
+                  }, 100);
+              });
           }
 
           function toggleFreq() {
@@ -326,7 +357,8 @@
           function finalizeLoad() {
               set('🟢 Database Synced');
               $('main').classList.remove('hide'); $('main').style.display =
-  'flex';
+  'block';
+              setMapHeight();
               resetPagination(); renderSchedules(); renderExportList();
   toggleFreq(); switchTab(1);
           }
@@ -625,10 +657,13 @@
                       cb();
                   },
                   focus: function() {
-                      if (map1 && $('t1').style.display !== 'none') {
+                      setMapHeight();
+                      setTimeout(function() {
+                          if (map1 && $('t1').style.display !== 'none') {
   map1.invalidateSize(); drawMap(1, C.filter(c => c.iW)); }
-                      if (map2 && $('t2').style.display !== 'none') {
+                          if (map2 && $('t2').style.display !== 'none') {
   map2.invalidateSize(); renderPages(); }
+                      }, 100);
                   },
                   blur: function() {}
               };
