@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Advanced Routing Scheduler</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        /* Core Layout */
+        body { margin: 0; padding: 15px; font-family: sans-serif; background: #f4f7f6; height: 100vh; box-sizing: border-box; overflow: hidden; }
+        .container { background: #fff; padding: 15px; border-radius: 8px; height: 100%; display: flex; flex-direction: column; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .row { display: flex; gap: 10px; margin-bottom: 10px; align-items: center; }
+        .inp { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        
+        /* Buttons */
+        .btn { color: #fff; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-blue { background: #3498db; } .btn-green { background: #10b981; } .btn-red { background: #e74c3c; } 
+        .btn-dark { background: #2c3e50; } .btn-gray { background: #95a5a6; } .btn-orange { background: #f39c12; }
+        
+        /* Utilities */
+        .hide { display: none !important; }
+        
+        /* Split Screen Layout */
+        .split { display: flex; gap: 15px; flex: 1; min-height: 0; height: calc(100vh - 120px); }
+        .pane-l { flex: 1.2; overflow-y: auto; padding-right: 10px; }
+        .pane-r { flex: 1; display: flex; flex-direction: column; position: relative; }
+        .map-box { flex: 1; border-radius: 8px; border: 1px solid #ccc; background: #eef2f3; z-index: 1; }
+        
+        /* Custom Map Pins */
+        .m-wms { background: #3498db; width: 16px; height: 16px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 4px #000; cursor: pointer; }
+        .m-std { background: #95a5a6; width: 12px; height: 12px; border-radius: 50%; border: 1px solid #fff; box-shadow: 0 0 3px #000; cursor: pointer; }
+        .m-sel { border: 2px solid #f39c12 !important; transform: scale(1.3); z-index: 999 !important; }
+
+        /* Modal */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 9999; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="row" style="justify-content: space-between; margin-bottom: 15px; flex-shrink: 0;">
+            <h2 style="margin: 0; color: #2c3e50;">Advanced Routing: Scheduler</h2>
+            <div id="status" style="font-size: 12px; font-weight: bold; padding: 4px 8px; border-radius: 4px; background: #ecf0f1; color: #333;">Booting Engine...</div>
+        </div>
+
+        <div id="main" class="hide" style="flex: 1; min-height: 0; flex-direction: column;">
+            <div class="row" style="border-bottom: 1px solid #ccc; padding-bottom: 10px; justify-content: space-between; flex-shrink: 0;">
+                <div>
+                    <button class="btn tab-btn btn-dark" onclick="switchTab(1)" style="border-radius: 4px 0 0 4px;">1. Schedules</button>
+                    <button class="btn tab-btn btn-gray" onclick="switchTab(2)" style="border-radius: 0 4px 4px 0; border-left: 1px solid #ccc;">2. Locations</button>
+                </div>
+                <button class="btn btn-blue" onclick="loadData()">🔄 Sync DB</button>
+            </div>
+
+            <div id="t1" class="split">
+                <div class="pane-l">
+                    <div style="background: #eef2f3; padding: 15px; border-radius: 4px; margin-bottom: 20px;">
+                        <h4>Create / Edit Schedule</h4>
+                        <div class="row">
+                            <input id="rn" class="inp" style="flex: 2;" placeholder="Schedule Name *">
+                            <select id="ri" class="inp" onchange="toggleFreq()">
+                                <option value="daily">Daily</option>
+                                <option value="weekly" selected>Weekly</option>
+                                <option value="biweekly">Bi-Weekly</option>
+                                <option value="monthly">Monthly</option>
+                            </select>
+                            <input id="rsd" class="inp" type="date">
+                        </div>
+                        <div class="row" style="align-items: flex-start; margin-top: 15px;">
+                            <div style="flex: 1;">
+                                <strong>Assigned Locations:</strong>
+                                <div id="rcl" style="height: 120px; overflow-y: auto; background: #fff; border: 1px solid #ccc; padding: 8px; margin-top: 5px;"></div>
+                            </div>
+                            <div style="flex: 1;">
+                                <strong>Timing Rule:</strong>
+                                <div style="background: #fff; border: 1px solid #ccc; padding: 8px; margin-top: 5px; height: 120px; overflow-y: auto;">
+                                    <div id="d-days"></div>
+                                    <div id="d-date" class="hide">
+                                        <label>Day of Month (1-31):</label><br>
+                                        <input id="rdom" type="number" min="1" max="31" class="inp" value="1">
+                                    </div>
+                                    <div id="d-daily" class="hide"><p>Runs every single day!</p></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="margin-top: 15px;">
+                            <button class="btn btn-blue" onclick="saveSchedule()">Save Schedule</button> 
+                            <button class="btn btn-gray hide" id="rxBtn" onclick="cancelSchedule()">Cancel</button>
+                        </div>
+                    </div>
+                    
+                    <h4 style="border-bottom: 2px solid #3498db; margin: 0 0 10px;">Active Schedules</h4>
+                    <div id="rls"></div>
+                    
+                    <div style="background: #eef2f3; padding: 15px; border-radius: 4px; text-align: center; margin-top: 30px; border-top: 3px solid #10b981;">
+                        <h4 style="margin-top: 0;">Export R&O CSV</h4>
+                        <div id="erl" style="background: #fff; padding: 10px; border: 1px solid #ccc; max-height: 150px; overflow-y: auto; margin: 0 auto 15px; text-align: left; max-width: 450px;"></div>
+                        <div class="row" style="justify-content: center;">
+                            <select id="edo" class="inp" style="max-width: 150px;">
+                                <option value="7">7 Days</option><option value="14">14 Days</option><option value="30" selected>30 Days</option>
+                            </select>
+                            <button class="btn btn-green" onclick="exportData()">⬇️ Download R&O File</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="pane-r">
+                    <div id="map1" class="map-box"></div>
+                </div>
+            </div>
+
+            <div id="t2" class="split hide">
+                <div class="pane-l">
+                    <div style="background: #eef2f3; border: 1px solid #ccc; padding: 15px; border-radius: 4px; margin-bottom: 20px; border-left: 4px solid #3498db;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <h4 style="margin: 0 0 5px 0;">Smart Import</h4>
+                                <p style="margin: 0; font-size: 12px; color: #666;">Upload CSV Template</p>
+                            </div>
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <input type="file" id="cU" class="inp" accept=".csv" style="max-width: 250px;">
+                                <button class="btn btn-blue" onclick="processImport()">Review</button>
+                            </div>
+                        </div>
+                        <div id="iR" class="hide" style="margin-top: 15px; border-top: 1px solid #ccc; padding-top: 15px;">
+                            <div id="iT" style="max-height: 300px; overflow-y: auto; background: #fff; border: 1px solid #ccc; margin-bottom: 10px;"></div>
+                            <button class="btn btn-green" id="bCI" onclick="confirmImport()">Import</button> 
+                            <button class="btn btn-gray" onclick="document.getElementById('iR').classList.add('hide')">Cancel</button>
+                        </div>
+                    </div>
+
+                    <div style="background: #fff; border: 1px solid #ddd; padding: 15px; border-radius: 4px; margin-bottom: 20px;">
+                        <h4 id="eH" style="margin-top: 0;">Add / Edit Location</h4>
+                        <div class="row">
+                            <input id="cn" class="inp" placeholder="Account Name *">
+                            <input id="ca" class="inp" style="flex: 2;" placeholder="Street Address *">
+                        </div>
+                        <div class="row">
+                            <input id="cc" class="inp" style="flex: 2;" placeholder="City *">
+                            <input id="cs" class="inp" placeholder="State *">
+                            <input id="cz" class="inp" placeholder="Zip">
+                        </div>
+                        <div class="row">
+                            <input id="clt" class="inp" type="number" placeholder="Lat (Auto or Drag Pin)">
+                            <input id="cln" class="inp" type="number" placeholder="Lon (Auto or Drag Pin)">
+                            <input id="cno" class="inp" style="flex: 2;" placeholder="General Notes">
+                        </div>
+                        
+                        <a href="#" id="shAdv" onclick="document.getElementById('adv-fields').classList.remove('hide'); this.classList.add('hide'); return false;" style="font-size: 12px; color: #3498db; font-weight: bold; text-decoration: none;">+ Show Routing Fields</a>
+                        
+                        <div id="adv-fields" class="hide" style="background: #f9f9f9; padding: 15px; border: 1px dashed #ccc; border-radius: 4px; margin-top: 10px;">
+                            <div class="row">
+                                <input id="cac" class="inp" placeholder="Account ID">
+                                <input id="cot" class="inp" placeholder="Order Type *" value="recurring">
+                                <input id="cdu" class="inp" type="number" placeholder="Duration (30)">
+                            </div>
+                            <div class="row">
+                                <div style="flex: 1;"><label style="font-size: 11px;">Win Start</label><input id="ct1" class="inp" type="time" value="08:00"></div>
+                                <div style="flex: 1;"><label style="font-size: 11px;">Win End</label><input id="ct2" class="inp" type="time" value="17:00"></div>
+                                <div style="flex: 1;"><label style="font-size: 11px; color: #e74c3c;">Unavail Start</label><input id="bt1" class="inp" type="time"></div>
+                                <div style="flex: 1;"><label style="font-size: 11px; color: #e74c3c;">Unavail End</label><input id="bt2" class="inp" type="time"></div>
+                            </div>
+                        </div>
+                        <div style="margin-top: 10px;">
+                            <button class="btn btn-blue" id="sCb" onclick="saveLocation()">Save Location</button> 
+                            <button class="btn btn-gray hide" id="cxBtn" onclick="cancelLocation()">Cancel</button>
+                        </div>
+                    </div>
+
+                    <div class="row" style="background: #2c3e50; padding: 10px; border-radius: 4px; color: white; position: sticky; top: 0; z-index: 10;">
+                        <strong style="font-size: 16px;">Location Database</strong>
+                        <input id="sc" class="inp" style="color: black; max-width: 200px;" placeholder="Search..." onkeyup="renderPages()">
+                    </div>
+                    
+                    <h4 style="border-bottom: 2px solid #10b981; margin: 10px 0;">Advanced Routing Locations</h4>
+                    <div id="cW" style="margin-bottom: 10px;"></div>
+                    
+                    <h4 style="border-bottom: 2px solid #95a5a6; margin: 20px 0 10px;">Standard Geotab Zones</h4>
+                    <div id="cS" style="margin-bottom: 15px;"></div>
+                </div>
+                
+                <div class="pane-r">
+                    <div id="map2" class="map-box"></div>
+                    <p style="font-size: 11px; color: #666; text-align: center; margin-top: 5px;">💡 Drag and drop any pin to instantly update its Geotab coordinates.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        var api, mId, C = [], R = [], sI = [], eC = null, eR = null, pendingImport = [];
+        var map1, map2, markers1 = [], markers2 = [];
+        const $ = (id) => document.getElementById(id);
+        const set = (msg) => $('status').innerText = msg;
+        const enc = (s) => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        const gn = () => Math.random().toString(36).substr(2,9);
+
+        // Map Initialization
+        function initMaps() {
+            if (!map1) {
+                map1 = L.map('map1').setView([39.82, -98.57], 4);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map1);
+            }
+            if (!map2) {
+                map2 = L.map('map2').setView([39.82, -98.57], 4);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map2);
+            }
+        }
+
+        function drawMap(tab) {
+            let m = tab === 1 ? map1 : map2;
+            let mks = tab === 1 ? markers1 : markers2;
+            if (!m) return;
+            
+            mks.forEach(mk => m.removeLayer(mk));
+            mks.length = 0;
+
+            let bounds = L.latLngBounds();
+            let filter = $('sc') ? $('sc').value.toLowerCase() : '';
+
+            C.forEach(c => {
+                if (c.d.n.toLowerCase().includes(filter)) {
+                    if (tab === 1 && !c.iW) return; // Tab 1 only shows advanced routing locations
+                    if (!c.d.lt || !c.d.ln) return;
+
+                    let cName = c.iW ? 'm-wms' : 'm-std';
+                    let marker = L.marker([c.d.lt, c.d.ln], {
+                        draggable: (tab === 2), // Only draggable on Locations tab
+                        icon: L.divIcon({ className: cName, iconSize: c.iW ? [16, 16] : [12, 12] })
+                    }).addTo(m);
+
+                    marker.bindTooltip(enc(c.d.n), { direction: 'top' });
+                    
+                    if (tab === 2) {
+                        marker.on('dragend', function(e) {
+                            let newPos = e.target.getLatLng();
+                            let dLat = newPos.lat - parseFloat(c.d.lt);
+                            let dLon = newPos.lng - parseFloat(c.d.ln);
+                            c.d.lt = newPos.lat.toFixed(6);
+                            c.d.ln = newPos.lng.toFixed(6);
+                            
+                            c.z.points.forEach(pt => { pt.y += dLat; pt.x += dLon; });
+                            let newZone = Object.assign({}, c.z);
+                            if (c.iW) newZone.comment = (c.d.no ? c.d.no + "\\n\\n" : "") + "--- WMS_SYSTEM_DATA ---\\n" + JSON.stringify(c.d);
+                            
+                            set('Saving new map location...');
+                            api.call('Set', { typeName: 'Zone', entity: newZone }, () => {
+                                c.z = newZone;
+                                set('🟢 Map Updated');
+                            });
+                        });
+                    }
+
+                    mks.push(marker);
+                    bounds.extend([c.d.lt, c.d.ln]);
+                }
+            });
+
+            if (bounds.isValid()) {
+                m.fitBounds(bounds, { padding: [30, 30] });
+            }
+        }
+
+        // Core Application Logic
+        function switchTab(t) {
+            $('t1').classList.add('hide'); $('t1').style.display = 'none';
+            $('t2').classList.add('hide'); $('t2').style.display = 'none';
+            $('t' + t).classList.remove('hide'); $('t' + t).style.display = 'flex';
+            
+            document.querySelectorAll('.tab-btn').forEach(b => b.className = 'btn tab-btn btn-gray');
+            document.querySelectorAll('.tab-btn')[t-1].className = 'btn tab-btn btn-dark';
+            
+            setTimeout(() => { 
+                if(t === 1 && map1) { map1.invalidateSize(); drawMap(1); }
+                if(t === 2 && map2) { map2.invalidateSize(); drawMap(2); }
+            }, 250);
+        }
+
+        function toggleFreq() {
+            let v = $('ri').value;
+            $('d-days').classList.add('hide'); $('d-date').classList.add('hide'); $('d-daily').classList.add('hide');
+            if (v === 'daily') $('d-daily').classList.remove('hide');
+            else if (v === 'weekly' || v === 'biweekly') $('d-days').classList.remove('hide');
+            else $('d-date').classList.remove('hide');
+        }
+
+        function loadData() {
+            $('main').classList.add('hide');
+            set('Fetching from Geotab...');
+            
+            api.call('Get', { typeName: 'Zone' }, zones => {
+                C = [];
+                zones.forEach(z => {
+                    if (!z.points || !z.points.length) return;
+                    let lats = z.points.map(p => p.y); let lons = z.points.map(p => p.x);
+                    let d = {
+                        n: z.name, no: z.comment || '', 
+                        lt: ((Math.max(...lats) + Math.min(...lats)) / 2).toFixed(6), 
+                        ln: ((Math.max(...lons) + Math.min(...lons)) / 2).toFixed(6),
+                        a: '', c: '', s: '', z: '', o: '', ty: '', ac: '', cn: '', em: '', ph: '', du: '30', re: '0', t1: '08:00', t2: '17:00', b1: '', b2: '', brs: 'auto'
+                    };
+                    let iW = false;
+                    if (z.comment && z.comment.includes('WMS_SYSTEM_DATA')) {
+                        iW = true;
+                        let p = z.comment.split('WMS_SYSTEM_DATA');
+                        d.no = p[0].replace('---','').trim();
+                        try { Object.assign(d, JSON.parse(p[1].replace('---','').trim())); } catch(e){}
+                    }
+                    C.push({ id: z.id, n: z.name, d: d, z: z, iW: iW });
+                });
+                C.sort((a,b) => a.n.localeCompare(b.n));
+
+                api.call('Get', { typeName: 'Group' }, groups => {
+                    let f = {}; const fl = l => l.forEach(x => { f[x.id] = x; if (x.children) fl(x.children); }); fl(groups);
+                    let mg = Object.values(f).find(x => x.name === '[RO_DB]');
+                    
+                    if (mg) {
+                        mId = mg.id; R = [];
+                        if (mg.children) {
+                            mg.children.forEach(c => {
+                                let fc = f[c.id];
+                                if (fc && fc.comments) {
+                                    try { let cd = JSON.parse(fc.comments); if(cd.t === 'R') R.push({ id: fc.id, n: fc.name, d: cd }); } catch(e){}
+                                }
+                            });
+                        }
+                        finalizeLoad();
+                    } else {
+                        api.call('Add', { typeName: 'Group', entity: { name: '[RO_DB]', parent: { id: 'GroupCompanyId' }, comments: 'DB' } }, id => {
+                            mId = id; R = []; finalizeLoad();
+                        });
+                    }
+                });
+            }, err => set('API Error: ' + err.message));
+        }
+
+        function finalizeLoad() {
+            set('🟢 Database Synced');
+            $('main').classList.remove('hide');
+            $('main').style.display = 'flex';
+            initMaps();
+            renderPages();
+            renderSchedules();
+            renderExportList();
+            toggleFreq();
+            switchTab(1);
+        }
+
+        function renderPages() {
+            let f = $('sc') ? $('sc').value.toLowerCase() : '';
+            let w = $('cW'), s = $('cS'), rl = $('rcl');
+            
+            w.innerHTML = ''; s.innerHTML = ''; rl.innerHTML = '';
+            
+            C.forEach(c => {
+                if (c.d.n.toLowerCase().includes(f)) {
+                    if (c.iW) {
+                        rl.innerHTML += `<label style="display:block"><input type="checkbox" class="rcb" value="${c.id}"> ${enc(c.d.n)}</label>`;
+                        w.innerHTML += buildRow(c, true);
+                    } else {
+                        s.innerHTML += buildRow(c, false);
+                    }
+                }
+            });
+            drawMap(1); drawMap(2);
+        }
+
+        function buildRow(c, isAdv) {
+            let btn = isAdv 
+                ? `<button class="btn btn-orange" onclick="editLocation('${c.id}')">Edit</button> <button class="btn btn-red" onclick="downgradeLoc('${c.id}')">Downgrade</button>`
+                : `<button class="btn btn-blue" onclick="editLocation('${c.id}')">Upgrade</button> <button class="btn btn-gray" onclick="deleteLoc('${c.id}')">Delete</button>`;
+                
+            return `
+            <div style="padding:8px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <strong style="color:#2c3e50; cursor:pointer;" onclick="panTo('${c.id}')">${enc(c.d.n)}</strong><br>
+                    <span style="font-size:11px; color:#7f8c8d">${c.d.lt}, ${c.d.ln}</span>
+                </div>
+                <div>${btn}</div>
+            </div>`;
+        }
+
+        function panTo(id) {
+            let c = C.find(x => x.id === id);
+            if (c && c.d.lt) {
+                let m = $('t1').classList.contains('hide') ? map2 : map1;
+                if (m) m.setView([c.d.lt, c.d.ln], 16);
+            }
+        }
+
+        // LOCATIONS TAB LOGIC
+        function editLocation(id) {
+            let c = C.find(x => x.id === id);
+            if(!c) return;
+            eC = id; let d = c.d;
+            ['cn','ca','cc','cs','cz','clt','cln','cno','cac','cot','cdu','cre','ct1','ct2','bt1','bt2'].forEach(k => {
+                let el = $(k === 't1' ? 'ct1' : k === 't2' ? 'ct2' : k === 'b1' ? 'bt1' : k === 'b2' ? 'bt2' : k === 'no' ? 'cno' : k === 'n' ? 'cn' : k === 'a' ? 'ca' : k === 'c' ? 'cc' : k === 's' ? 'cs' : k);
+                if (el) el.value = d[k] || '';
+            });
+            
+            $('adv-fields').classList.remove('hide');
+            $('cxBtn').classList.remove('hide');
+            $('shAdv').classList.add('hide');
+            $('sCb').innerText = 'Save as Routing Location';
+            $('eH').scrollIntoView();
+        }
+
+        function cancelLocation() {
+            eC = null;
+            ['cn','ca','cc','cs','cz','clt','cln','cno','cac','cot','cdu','cre','bt1','bt2'].forEach(i => $(i).value = '');
+            $('ct1').value = '08:00'; $('ct2').value = '17:00';
+            $('cxBtn').classList.add('hide');
+            $('adv-fields').classList.add('hide');
+            $('shAdv').classList.remove('hide');
+            $('sCb').innerText = 'Save Location';
+        }
+
+        function saveLocation() {
+            let n = $('cn').value, a = $('ca').value, c = $('cc').value, s = $('cs').value, ty = $('cot').value;
+            if (!n || !a || !c || !s || !ty) return alert('Required: Name, Street, City, State, Type');
+            
+            let d = {
+                a:a, c:c, s:s, z:$('cz').value, o:'US', ty:ty, cn:'', ac:$('cac').value, em:'', ph:'',
+                du:$('cdu').value||'30', re:$('cre').value||'0', t1:$('ct1').value||'08:00', t2:$('ct2').value||'17:00', b1:$('bt1').value, b2:$('bt2').value, brs:'auto'
+            };
+            let no = $('cno').value;
+            let fc = (no ? no + "\\n\\n" : "") + "--- WMS_SYSTEM_DATA ---\\n" + JSON.stringify(d);
+            
+            let lt = parseFloat($('clt').value), ln = parseFloat($('cln').value);
+            
+            let p = (y, x) => {
+                let e;
+                if (eC) {
+                    e = Object.assign({}, C.find(x => x.id === eC).z);
+                    e.name = n; e.comment = fc;
+                } else {
+                    let o = 0.001;
+                    e = { name: n, comment: fc, points: [{x:x-o,y:y-o},{x:x-o,y:y+o},{x:x+o,y:y+o},{x:x+o,y:y-o}], fillColor: {r:52,g:152,b:219,a:100}, groups: [{id: 'GroupCompanyId'}] };
+                }
+                set('Saving...');
+                api.call(eC ? 'Set' : 'Add', { typeName: 'Zone', entity: e }, () => {
+                    if (eC) {
+                        let cu = C.find(x => x.id === eC); cu.iW = true; cu.z = e; cu.d = Object.assign(d, {n:n, lt:y, ln:x});
+                        cancelLocation(); set('🟢 Ready'); renderPages();
+                    } else {
+                        cancelLocation(); loadData();
+                    }
+                });
+            };
+
+            if (!lt || !ln) {
+                api.call('GetCoordinates', { addresses: [`${a}, ${c}, ${s}`] }, r => {
+                    if (r && r[0]) p(r[0].y, r[0].x); else alert('Geocode fail. Please manually enter Lat/Lon or drag the pin later.');
+                });
+            } else {
+                p(lt, ln);
+            }
+        }
+
+        function downgradeLoc(id) {
+            if(!confirm('Downgrade this location to standard? It will lose routing data but keep its map geofence.')) return;
+            let c = C.find(x => x.id === id);
+            let z = Object.assign({}, c.z);
+            z.comment = z.comment.split('--- WMS_SYSTEM_DATA ---')[0].trim();
+            set('Downgrading...');
+            api.call('Set', { typeName: 'Zone', entity: z }, () => {
+                c.iW = false; c.z.comment = z.comment; set('🟢 Ready'); renderPages();
+            });
+        }
+
+        function deleteLoc(id) {
+            if(!confirm('Permanently delete this Geotab Zone? This destroys historical map data.')) return;
+            set('Deleting...');
+            api.call('Remove', { typeName: 'Zone', entity: { id: id } }, () => {
+                C = C.filter(x => x.id !== id); set('🟢 Ready'); renderPages();
+            });
+        }
+
+        // SCHEDULES TAB LOGIC
+        function renderSchedules() {
+            $('rls').innerHTML = '';
+            R.forEach(r => {
+                let f = r.d.f || 'weekly';
+                let sStr = f === 'daily' ? 'Daily' : f === 'weekly' || f === 'biweekly' ? f + ' ' + (r.d.d || []).map(x => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][x]).join(',') : f + ' Day ' + (r.d.v || 1);
+                $('rls').innerHTML += `
+                <div style="padding:10px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;">
+                    <div><strong>${enc(r.d.n)}</strong><br><span style="font-size:11px; color:#666;">${sStr}</span></div>
+                    <div>
+                        <button class="btn btn-orange" onclick="editSchedule('${r.id}')">Edit</button>
+                        <button class="btn btn-red" onclick="deleteSchedule('${r.id}')">Del</button>
+                    </div>
+                </div>`;
+            });
+        }
+
+        function saveSchedule() {
+            let c = Array.from(document.querySelectorAll('.rcb:checked')).map(x => x.value);
+            let d = Array.from(document.querySelectorAll('.dcb:checked')).map(x => parseInt(x.value));
+            let v = parseInt($('rdom').value) || 1, s = $('rsd').value, f = $('ri').value;
+            
+            if (!c.length || !s) return alert("Select at least one location and a start date.");
+            
+            let o = { t: 'R', n: $('rn').value, c: c, f: f, d: d, v: v, s: s };
+            let e = { parent: { id: mId }, comments: JSON.stringify(o) };
+            if (eR) { e.id = eR; e.name = R.find(x => x.id === eR).n; } 
+            else e.name = '[RO]' + gn();
+            
+            set('Saving Schedule...');
+            api.call(eR ? 'Set' : 'Add', { typeName: 'Group', entity: e }, () => {
+                if (eR) { let r = R.find(x => x.id === eR); r.n = e.name; r.d = o; cancelSchedule(); renderSchedules(); renderExportList(); set('🟢 Ready'); }
+                else loadData();
+            });
+        }
+
+        function editSchedule(id) {
+            let r = R.find(x => x.id === id); eR = id;
+            $('rn').value = r.d.n; $('ri').value = r.d.f || 'weekly'; $('rsd').value = r.d.s; $('rdom').value = r.d.v || 1;
+            document.querySelectorAll('.rcb').forEach(c => c.checked = r.d.c.includes(c.value));
+            document.querySelectorAll('.dcb').forEach(c => c.checked = (r.d.d || []).includes(parseInt(c.value)));
+            toggleFreq(); $('rxBtn').classList.remove('hide'); window.scrollTo(0,0);
+        }
+
+        function cancelSchedule() {
+            eR = null; $('rn').value = $('rsd').value = '';
+            document.querySelectorAll('.rcb,.dcb').forEach(c => c.checked = false);
+            $('rxBtn').classList.add('hide');
+        }
+
+        function deleteSchedule(id) {
+            if(!confirm("Delete this schedule?")) return;
+            api.call('Remove', { typeName: 'Group', entity: { id: id } }, () => {
+                R = R.filter(x => x.id !== id); renderSchedules(); renderExportList();
+            });
+        }
+
+        function renderExportList() {
+            $('erl').innerHTML = '';
+            R.forEach(r => $('erl').innerHTML += `<label style="display:block"><input type="checkbox" class="ecb" value="${r.id}"> ${enc(r.d.n)}</label>`);
+        }
+
+        function exportData() {
+            let r = Array.from(document.querySelectorAll('.ecb:checked')).map(x => x.value), ids = [];
+            R.forEach(x => { if (r.includes(x.id)) ids = ids.concat(x.d.c); });
+            if(!ids.length) return alert("Select schedules to generate.");
+            bCSV([...new Set(ids)], false, parseInt($('edo').value));
+        }
+
+        function bCSV(ids, iS, dO) {
+            set('Generating Export...');
+            let csv = 'Arrival Date, Arrival Time, Order Id*,Order Type Id*,Account Name,Account Id*,Appointment Id*,Duration,Revenue,Window Begin Time*,Window End Time*,Appointment Notes,Contact Name*,Primary Phone,Secondary Phone,Email Address,Preferred Contact Method,Do Not Email,Do Not Phone,Do Not Text,City*,Country*,Postal Code,State*,Street1*,Street2,Latitude,Longitude,Locked Resource Id,Do Not Send Resource Id,Preferred Resource Id,Custom Status\\n';
+            let td = new Date(); td.setHours(0,0,0,0); let ct = 0;
+            
+            for (let i = 0; i < (iS ? 1 : dO); i++) {
+                let cd = new Date(td); cd.setDate(td.getDate() + i);
+                let dw = cd.getDay(), ds = cd.toISOString().split('T')[0];
+                
+                ids.forEach(id => {
+                    let c = C.find(x => x.id === id); if (!c) return;
+                    if (!iS) {
+                        let ok = false;
+                        R.forEach(r => {
+                            if (!r.d.c.includes(id)) return;
+                            let sD = new Date((r.d.s || ds) + 'T00:00:00'), cN = new Date(ds + 'T00:00:00');
+                            if (cN >= sD) {
+                                let f = r.d.f || 'weekly', v = r.d.v || 1;
+                                if (f === 'daily') ok = true;
+                                else if (f === 'weekly' && (r.d.d || []).includes(dw)) ok = true;
+                                else if (f === 'biweekly' && Math.floor((cN - sD) / 86400000 / 7) % 2 === 0 && (r.d.d || []).includes(dw)) ok = true;
+                                else if (f === 'monthly' && cN.getDate() === v) ok = true;
+                                else if (f === 'quarterly' && ((cN.getFullYear() - sD.getFullYear()) * 12 + cN.getMonth() - sD.getMonth()) % 3 === 0 && cN.getDate() === v) ok = true;
+                                else if (f === 'annually' && cN.getMonth() === sD.getMonth() && cN.getDate() === v) ok = true;
+                            }
+                        });
+                        if (!ok) return;
+                    }
+                    
+                    let t1 = c.d.t1 || '08:00', t2 = c.d.t2 || '17:00', no = c.d.no || '';
+                    if (c.d.b1 && c.d.b2) {
+                        let s = c.d.brs || 'auto';
+                        if (s === 'notes_only') no += ' [Unavail: ' + c.d.b1 + '-' + c.d.b2 + ']';
+                        else {
+                            let m = x => parseInt(x.split(':')[0]) * 60 + parseInt(x.split(':')[1]);
+                            let da = m(c.d.b1) - m(t1), db = m(t2) - m(c.d.b2);
+                            if (s === 'morning') t2 = c.d.b1;
+                            else if (s === 'afternoon') t1 = c.d.b2;
+                            else { if (da >= db && da > 0) t2 = c.d.b1; else if (db > 0) t1 = c.d.b2; }
+                            no += ' [Unavail: ' + c.d.b1 + '-' + c.d.b2 + ']';
+                        }
+                    }
+                    
+                    let oI = (iS ? 'SD_' : 'R_') + (c.d.ac || id).replace(/[^a-zA-Z0-9]/g, '').substring(0, 8) + '_' + (iS ? gn() : ds.replace(/-/g, ''));
+                    csv += [iS ? '' : ds, '', oI, esc(c.d.ty), esc(c.d.n), esc(c.d.ac || id), oI, c.d.du, c.d.re, t1, t2, esc(no), esc(c.d.cn || c.d.n), esc(c.d.ph), '', esc(c.d.em), 'Email', 'FALSE', 'FALSE', 'FALSE', esc(c.d.c), esc(c.d.o), esc(c.d.z), esc(c.d.s), esc(c.d.a), '', c.d.lt || '', c.d.ln || '', '', '', '', ''].join(',') + "\\n";
+                    ct++;
+                });
+            }
+            
+            set('🟢 Ready');
+            if (!ct) return alert('No active orders found for this timeframe.');
+            
+            let l = document.createElement('a'); l.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
+            l.download = 'RO_Export_' + td.toISOString().split('T')[0] + '.csv'; l.click();
+        }
+
+        // GEOTAB INITIALIZATION
+        geotab.addin.advanced_routing_scheduler = function(api, state) {
+            return {
+                initialize: function(a, s, cb) {
+                    window.api = a;
+                    
+                    let dh=''; ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach((d,i) => dh += `<label style="display:inline-block; margin-right:10px;"><input type="checkbox" class="dcb" value="${i}"> ${d}</label>`);
+                    $('d-days').innerHTML = dh;
+                    
+                    loadData();
+                    cb();
+                },
+                focus: function() {
+                    if (map1) map1.invalidateSize();
+                    if (map2) map2.invalidateSize();
+                },
+                blur: function() {}
+            };
+        };
+    </script>
+</body>
+</html>
